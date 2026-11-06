@@ -1,0 +1,72 @@
+name: CleanYourTV - Pioneer ATV R2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compilar launcher oficial personalizado
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repositorio original
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar plataforma y herramientas oficiales
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+
+      - name: Configurar dock Pioneer ATV R2 (4 accesos)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          config = Path('launcher/app/src/main/res/values/config.xml')
+          xml = config.read_text(encoding='utf-8')
+          apps = [
+              'com.amazon.amazonvideo.livingroom',  # Prime Video
+              'com.disney.disneyplus',               # Disney+
+              'com.google.android.youtube.tv',      # YouTube
+              'com.google.android.youtube.tvmusic',  # YouTube Music
+          ]
+          dock = '<string-array name="dock_apps">\n' + ''.join(
+              f'        <item>{app}</item>\n' for app in apps
+          ) + '    </string-array>'
+          xml, dock_count = re.subn(
+              r'<string-array name="dock_apps">.*?</string-array>',
+              dock, xml, count=1, flags=re.DOTALL
+          )
+          xml, column_count = re.subn(
+              r'<integer name="columns">\d+</integer>',
+              '<integer name="columns">4</integer>',
+              xml, count=1
+          )
+          if dock_count != 1 or column_count != 1:
+              raise RuntimeError('No se encontraron las claves dock_apps y columns del repositorio; no compilar una configuración incompleta')
+          config.write_text(xml, encoding='utf-8')
+          print('Dock configurado con 4 apps; launcher original preservado en el televisor.')
+          PY
+
+      - name: Compilar APK release firmado para pruebas
+        working-directory: launcher
+        run: bash ./gradlew --no-daemon --console=plain assembleRelease
+
+      - name: Publicar APK para descargar desde iPhone
+        uses: actions/upload-artifact@v4
+        with:
+          name: CleanYourTV-Pioneer-ATV-R2
+          path: launcher/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 7
